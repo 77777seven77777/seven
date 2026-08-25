@@ -3,39 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SEVEN AIM</title>
+    <title>SEVEN AIM - Ultimate</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800;900&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="game-wrapper">
-        <!-- Custom Crosshair -->
+        <!-- Taunts Background -->
+        <div id="taunt-display"></div>
+
+        <!-- Custom Smart Crosshair -->
         <div id="custom-cursor">
             <div class="crosshair-line horizontal"></div>
             <div class="crosshair-line vertical"></div>
             <div class="crosshair-dot"></div>
+            <div id="hitmarker">
+                <div class="hm-line hm-1"></div>
+                <div class="hm-line hm-2"></div>
+                <div class="hm-line hm-3"></div>
+                <div class="hm-line hm-4"></div>
+            </div>
         </div>
 
         <!-- HUD / UI -->
         <div id="ui-layer">
             <div class="glass-panel stat-box">Score: <span id="score">0</span></div>
+            <div class="glass-panel stat-box" id="combo-box">Combo: <span id="combo">x1</span></div>
+            <div class="glass-panel stat-box">Accuracy: <span id="accuracy">100</span>%</div>
             <div class="glass-panel stat-box">Aura: <span id="aura">100</span>%</div>
         </div>
 
-        <!-- Stealth Tutorial / Start Screen -->
+        <!-- Start Screen -->
         <div id="start-screen" class="glass-panel center-overlay">
             <h1 class="glitch-text">SEVEN AIM</h1>
-            <p>Destroy the anomaly to prove your worth.</p>
-            <div id="tutorial-target" class="target"></div>
+            <p style="color: #4a4e69; margin-bottom: 1rem; font-weight: 600;">DO NOT SPAM. EVERY MISS BREAKS YOUR COMBO.</p>
+            <button id="start-btn" class="btn-glass">Initialize Protocol</button>
         </div>
 
         <!-- Game Over Screen -->
         <div id="game-over-screen" class="glass-panel center-overlay hidden">
-            <h1 style="color: #d63031; margin-bottom: 1rem;">System Failure</h1>
-            <p style="font-size: 1.2rem;">Final Score: <span id="final-score" style="font-weight: 800;">0</span></p>
-            <p style="font-size: 1.5rem; margin: 1rem 0; color: #4a4e69;">Rank: <span id="rank-display" style="font-weight: 800; color: #1a1a2e;">Mortal</span></p>
+            <h1 style="color: #d63031; margin-bottom: 1rem; font-weight: 900;">AURA DEPLETED</h1>
+            <div class="stats-grid">
+                <p>Score: <span id="final-score">0</span></p>
+                <p>Accuracy: <span id="final-accuracy">0</span>%</p>
+                <p>Max Combo: <span id="final-combo">x1</span></p>
+            </div>
+            <p style="font-size: 1.5rem; margin: 1.5rem 0; color: #4a4e69; font-weight: 800;">Rank: <span id="rank-display" style="color: #1a1a2e;">Mortal</span></p>
             <button id="restart-btn" class="btn-glass">Reboot Matrix</button>
-            <!-- Remplace le lien ci-dessous par celui de ton premier site si tu veux faire un pont ! -->
             <a href="https://77777seven77777.github.io/7seven7/" class="btn-glass" style="margin-top: 15px; font-size: 0.9rem;">← Back to Hub</a>
         </div>
 
