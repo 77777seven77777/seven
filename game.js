@@ -1,209 +1,312 @@
-// DOM Elements
+// --- DOM ELEMENTS ---
 const wrapper = document.getElementById('game-wrapper');
 const cursor = document.getElementById('custom-cursor');
+const hitmarker = document.getElementById('hitmarker');
 const targetsContainer = document.getElementById('targets-container');
 const particlesContainer = document.getElementById('particles-container');
 const centerSeven = document.getElementById('center-seven');
 const scoreEl = document.getElementById('score');
+const comboEl = document.getElementById('combo');
+const comboBox = document.getElementById('combo-box');
+const accuracyEl = document.getElementById('accuracy');
 const auraEl = document.getElementById('aura');
 const startScreen = document.getElementById('start-screen');
 const gameOverScreen = document.getElementById('game-over-screen');
-const finalScoreEl = document.getElementById('final-score');
 const rankDisplay = document.getElementById('rank-display');
-const tutorialTarget = document.getElementById('tutorial-target');
-const restartBtn = document.getElementById('restart-btn');
+const tauntDisplay = document.getElementById('taunt-display');
 
-// Game State
+// --- GAME STATE ---
 let isPlaying = false;
-let score = 0;
-let aura = 100;
+let score = 0, combo = 1, maxCombo = 1;
+let shots = 0, hits = 0, accuracy = 100, aura = 100;
 let targets = [];
-let animationId;
-let lastSpawn = 0;
+let animationId, lastSpawn = 0;
+let spawnRate = 1200, targetBaseSpeed = 1.2;
 
-// Difficulty scaling
-let spawnRate = 1200; // MS between spawns
-let targetSpeed = 1.5; // Pixels per frame
+const TAUNTS = [
+    "Are you playing with a steering wheel?",
+    "My algorithm aims better while sleeping.",
+    "Please plug in your mouse.",
+    "Spamming won't save you.",
+    "Is this your first time using a PC?"
+];
 
-// 1. CUSTOM CROSSHAIR LOGIC
+// --- AUDIO ENGINE (WEB AUDIO API) ---
+let audioCtx;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+
+    if (type === 'shoot') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'hit') {
+        osc.type = 'highpass'; // Tick sound
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.05);
+    } else if (type === 'shatter') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+    }
+}
+
+// --- CROSSHAIR & HOVER LOGIC ---
 document.addEventListener('mousemove', (e) => {
     cursor.style.left = e.clientX + 'px';
     cursor.style.top = e.clientY + 'px';
+    
+    // Smart Crosshair
+    if (e.target.closest('.target')) cursor.classList.add('cursor-hover');
+    else cursor.classList.remove('cursor-hover');
 });
 
-// 2. START THE GAME (TUTORIAL CLICK)
-tutorialTarget.addEventListener('mousedown', (e) => {
-    createExplosion(e.clientX, e.clientY);
+// --- FREE FIRE LOGIC (The Core Mechanic) ---
+document.addEventListener('mousedown', (e) => {
+    if (!isPlaying) return;
+    if (e.target.closest('.btn-glass')) return; // Don't shoot UI buttons
+
+    initAudio();
+    shots++;
+    
+    // Recoil Animation
+    cursor.classList.add('cursor-shoot');
+    setTimeout(() => cursor.classList.remove('cursor-shoot'), 50);
+
+    const targetEl = e.target.closest('.target');
+    
+    if (targetEl) {
+        // IT'S A HIT!
+        playHitmarker();
+        playSound('hit');
+        hits++;
+        handleHit(targetEl);
+    } else {
+        // IT'S A MISS. (Punishment)
+        playSound('shoot');
+        combo = 1; // Break combo
+        updateUI();
+        checkTaunts();
+    }
+});
+
+function playHitmarker() {
+    hitmarker.classList.add('hit-active');
+    setTimeout(() => hitmarker.classList.remove('hit-active'), 100);
+}
+
+function handleHit(targetEl) {
+    let t = targets.find(obj => obj.element === targetEl);
+    if (!t) return;
+
+    if (t.type === 'armored') {
+        t.hp--;
+        if (t.hp > 0) {
+            targetEl.style.transform = `translate(-50%, -50%) scale(${0.8 + (t.hp*0.1)})`;
+            return; // Doesn't die yet
+        }
+    }
+
+    // Kill target
+    playSound('shatter');
+    createGlassParticles(t.x, t.y, t.type);
+    
+    // Math logic
+    score += (t.type === 'flick' ? 50 : (t.type === 'armored' ? 30 : 10)) * combo;
+    combo = Math.min(7, combo + 1);
+    if (combo > maxCombo) maxCombo = combo;
+    
+    t.element.remove();
+    targets = targets.filter(obj => obj.element !== targetEl);
+    updateUI();
+}
+
+// --- GAME LOOP & SPAWNING ---
+document.getElementById('start-btn').addEventListener('click', () => {
+    initAudio();
     startScreen.classList.add('hidden');
     startGame();
 });
 
-restartBtn.addEventListener('click', () => {
+document.getElementById('restart-btn').addEventListener('click', () => {
     gameOverScreen.classList.add('hidden');
     startGame();
 });
 
 function startGame() {
-    // Reset stats
     isPlaying = true;
-    score = 0;
-    aura = 100;
-    spawnRate = 1200;
-    targetSpeed = 1.5;
+    score = 0; combo = 1; maxCombo = 1;
+    shots = 0; hits = 0; accuracy = 100; aura = 100;
+    spawnRate = 1200; targetBaseSpeed = 1.2;
     targetsContainer.innerHTML = '';
-    targets = [];
+    targets = []; tauntDisplay.innerText = '';
     updateUI();
     
-    // Start Loop
     lastSpawn = performance.now();
     animationId = requestAnimationFrame(gameLoop);
 }
 
-// 3. MAIN GAME LOOP
 function gameLoop(timestamp) {
     if (!isPlaying) return;
 
-    // Spawn new target logic
     if (timestamp - lastSpawn > spawnRate) {
         spawnTarget();
         lastSpawn = timestamp;
-        // The game gets harder over time
-        spawnRate = Math.max(400, spawnRate - 15);
-        targetSpeed += 0.02;
+        spawnRate = Math.max(350, spawnRate - 12);
+        targetBaseSpeed += 0.015;
     }
 
-    // Move existing targets
     const centerX = window.innerWidth / 2;
     const centerY = window.innerHeight / 2;
-    const coreRadius = 60; // hitbox of the "7"
+    const coreRadius = 70;
 
     for (let i = targets.length - 1; i >= 0; i--) {
         let t = targets[i];
         
-        // Math to move towards center
-        let dx = centerX - t.x;
-        let dy = centerY - t.y;
-        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (t.type === 'flick') {
+            if (timestamp - t.spawnTime > 1200) { // Flick disappears fast
+                t.element.remove();
+                targets.splice(i, 1);
+                continue;
+            }
+        } else {
+            let dx = centerX - t.x;
+            let dy = centerY - t.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
 
-        // Check Collision with the center "7"
-        if (dist < coreRadius) {
-            takeDamage();
-            t.element.remove();
-            targets.splice(i, 1);
-            continue;
+            if (dist < coreRadius) {
+                takeDamage(t.type === 'armored' ? 20 : 10);
+                t.element.remove();
+                targets.splice(i, 1);
+                continue;
+            }
+
+            let moveX = (dx / dist) * t.speed;
+            let moveY = (dy / dist) * t.speed;
+            t.x += moveX; t.y += moveY;
+            t.element.style.left = t.x + 'px'; t.element.style.top = t.y + 'px';
         }
-
-        // Move target
-        let moveX = (dx / dist) * targetSpeed;
-        let moveY = (dy / dist) * targetSpeed;
-        t.x += moveX;
-        t.y += moveY;
-        
-        t.element.style.left = t.x + 'px';
-        t.element.style.top = t.y + 'px';
     }
 
     animationId = requestAnimationFrame(gameLoop);
 }
 
-// 4. SPAWN TARGET
 function spawnTarget() {
     const el = document.createElement('div');
-    el.className = 'target';
     
-    // Spawn randomly on the edges of the screen
+    // RNG Type
+    let rand = Math.random();
+    let type = 'normal'; let hp = 1; let speedMult = 1;
+    
+    if (rand > 0.90) { type = 'flick'; } // 10% Flick
+    else if (rand > 0.75) { type = 'armored'; hp = 3; speedMult = 0.6; } // 15% Armored
+
+    el.className = `target target-${type}`;
+    
     let side = Math.floor(Math.random() * 4);
     let startX, startY;
     
-    if (side === 0) { startX = Math.random() * window.innerWidth; startY = -50; } // Top
-    else if (side === 1) { startX = window.innerWidth + 50; startY = Math.random() * window.innerHeight; } // Right
-    else if (side === 2) { startX = Math.random() * window.innerWidth; startY = window.innerHeight + 50; } // Bottom
-    else { startX = -50; startY = Math.random() * window.innerHeight; } // Left
+    if (type === 'flick') {
+        startX = Math.random() * (window.innerWidth - 200) + 100;
+        startY = Math.random() * (window.innerHeight - 200) + 100;
+    } else {
+        if (side === 0) { startX = Math.random() * window.innerWidth; startY = -50; }
+        else if (side === 1) { startX = window.innerWidth + 50; startY = Math.random() * window.innerHeight; }
+        else if (side === 2) { startX = Math.random() * window.innerWidth; startY = window.innerHeight + 50; }
+        else { startX = -50; startY = Math.random() * window.innerHeight; }
+    }
 
-    el.style.left = startX + 'px';
-    el.style.top = startY + 'px';
-
-    // Click to destroy logic (UX folle)
-    el.addEventListener('mousedown', (e) => {
-        if (!isPlaying) return;
-        createExplosion(e.clientX, e.clientY);
-        score += 1;
-        updateUI();
-        el.remove();
-        // Remove from array
-        targets = targets.filter(t => t.element !== el);
-    });
-
+    el.style.left = startX + 'px'; el.style.top = startY + 'px';
     targetsContainer.appendChild(el);
-    targets.push({ element: el, x: startX, y: startY });
+    targets.push({ element: el, type: type, hp: hp, speed: targetBaseSpeed * speedMult, x: startX, y: startY, spawnTime: performance.now() });
 }
 
-// 5. GAME FEEL : EXPLOSIONS & DAMAGE
-function createExplosion(x, y) {
-    for (let i = 0; i < 8; i++) {
+// --- PARTICLES & DAMAGE ---
+function createGlassParticles(x, y, type) {
+    let color = type === 'armored' ? '#fde047' : (type === 'flick' ? '#c084fc' : '#fff');
+    for (let i = 0; i < 6; i++) {
         const p = document.createElement('div');
         p.className = 'particle';
-        p.style.left = x + 'px';
-        p.style.top = y + 'px';
+        p.style.width = (Math.random() * 10 + 5) + 'px';
+        p.style.height = (Math.random() * 10 + 5) + 'px';
+        p.style.background = color;
         particlesContainer.appendChild(p);
 
-        // Random trajectory
         let angle = Math.random() * Math.PI * 2;
-        let velocity = Math.random() * 60 + 20;
-        let destX = x + Math.cos(angle) * velocity;
-        let destY = y + Math.sin(angle) * velocity;
-
+        let vel = Math.random() * 80 + 30;
+        
         p.animate([
-            { transform: `translate(-50%, -50%) scale(1)`, opacity: 1, left: x + 'px', top: y + 'px' },
-            { transform: `translate(-50%, -50%) scale(0)`, opacity: 0, left: destX + 'px', top: destY + 'px' }
-        ], {
-            duration: 400,
-            easing: 'cubic-bezier(0.25, 1, 0.5, 1)'
-        }).onfinish = () => p.remove();
+            { transform: `translate(-50%, -50%) rotate(0deg)`, opacity: 1, left: x + 'px', top: y + 'px' },
+            { transform: `translate(-50%, -50%) rotate(${Math.random()*360}deg)`, opacity: 0, left: x + (Math.cos(angle)*vel) + 'px', top: y + (Math.sin(angle)*vel) + 100 + 'px' }
+        ], { duration: 600, easing: 'cubic-bezier(0.25, 1, 0.5, 1)' }).onfinish = () => p.remove();
     }
 }
 
-function takeDamage() {
-    aura -= 10;
+function takeDamage(amount) {
+    aura -= amount;
+    combo = 1; // Damage breaks combo
     updateUI();
     
-    // Screen shake
-    wrapper.classList.remove('shake');
-    void wrapper.offsetWidth; // trigger reflow
-    wrapper.classList.add('shake');
-    
-    // Core damage flash
-    centerSeven.classList.add('damage-flash');
-    setTimeout(() => centerSeven.classList.remove('damage-flash'), 200);
+    wrapper.classList.remove('shake'); void wrapper.offsetWidth; wrapper.classList.add('shake');
+    centerSeven.classList.add('damage-flash'); setTimeout(() => centerSeven.classList.remove('damage-flash'), 200);
 
-    if (aura <= 0) {
-        gameOver();
+    if (aura <= 0) gameOver();
+}
+
+// --- UI UPDATES & TAUNTS ---
+function updateUI() {
+    scoreEl.innerText = score;
+    comboEl.innerText = `x${combo}`;
+    auraEl.innerText = Math.max(0, aura);
+    
+    accuracy = shots === 0 ? 100 : Math.round((hits / shots) * 100);
+    accuracyEl.innerText = accuracy;
+    accuracyEl.style.color = accuracy < 50 ? '#ef4444' : '#fff';
+
+    // Seven Aura Evolution based on Combo
+    centerSeven.className = 'glass-panel';
+    comboBox.className = 'glass-panel stat-box';
+    if (combo >= 3 && combo < 7) { centerSeven.classList.add('seven-glow-1'); comboBox.classList.add('combo-active'); }
+    if (combo === 7) { centerSeven.classList.add('seven-glow-max'); comboBox.classList.add('combo-max'); }
+}
+
+function checkTaunts() {
+    if (shots > 10 && accuracy < 40 && Math.random() > 0.7) {
+        tauntDisplay.innerText = TAUNTS[Math.floor(Math.random() * TAUNTS.length)];
+        setTimeout(() => tauntDisplay.innerText = '', 2000);
     }
 }
 
-function updateUI() {
-    scoreEl.innerText = score;
-    auraEl.innerText = Math.max(0, aura);
-}
-
-// 6. ENDING THE GAME & LORE RANKS
+// --- GAME OVER ---
 function gameOver() {
-    isPlaying = false;
-    cancelAnimationFrame(animationId);
+    isPlaying = false; cancelAnimationFrame(animationId);
     
-    finalScoreEl.innerText = score;
+    document.getElementById('final-score').innerText = score;
+    document.getElementById('final-accuracy').innerText = accuracy;
+    document.getElementById('final-combo').innerText = `x${maxCombo}`;
     
-    // The Ego-Trip Ranking System
-    let rank = "Mortal Aim (Pathetic)";
-    let rankColor = "#4a4e69";
+    let rank = "Spammer (Accuracy too low)"; let rankColor = "#64748b";
     
-    if (score > 15) { rank = "Decent for a Human"; }
-    if (score > 35) { rank = "Pro Player (Still not 7)"; rankColor = "#0984e3"; }
-    if (score > 60) { rank = "Aura Awakened"; rankColor = "#6c5ce7"; }
-    if (score > 100) { rank = "SEVEN Level (Almost)"; rankColor = "#d63031"; }
+    if (accuracy >= 50 && score > 200) { rank = "Decent Aim"; rankColor = "#38bdf8"; }
+    if (accuracy >= 75 && score > 500) { rank = "Flickshot Master"; rankColor = "#a855f7"; }
+    if (accuracy >= 90 && score > 1000) { rank = "SEVEN Level"; rankColor = "#fbbf24"; }
 
-    rankDisplay.innerText = rank;
-    rankDisplay.style.color = rankColor;
-    
+    rankDisplay.innerText = rank; rankDisplay.style.color = rankColor;
     gameOverScreen.classList.remove('hidden');
 }
